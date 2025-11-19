@@ -11,7 +11,7 @@
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "expo": "^54.0.25",
-    "expo-camera": "^17.0.9",
+    "expo-camera": "~17.0.9",
     "expo-status-bar": "~3.0.8",
     "react": "19.1.0",
     "react-dom": "19.1.0",
