@@ -137,6 +137,17 @@ const NutritionView = ({ state, dispatch }) => {
   );
 };
 
+const baseInput = {
+  backgroundColor: COLORS.surfaceLight,
+  color: COLORS.text,
+  height: 50,
+  borderRadius: 12,
+  paddingHorizontal: 15,
+  marginBottom: 12,
+  borderWidth: 1,
+  borderColor: COLORS.bg
+};
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 20 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
@@ -151,9 +162,9 @@ const styles = StyleSheet.create({
   modalContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: COLORS.surface, padding: 24, borderRadius: 24, borderWidth: 1, borderColor: COLORS.surfaceLight },
   modalTitle: { color: COLORS.text, fontSize: 20, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  input: { backgroundColor: COLORS.surfaceLight, color: COLORS.text, height: 50, borderRadius: 12, paddingHorizontal: 15, marginBottom: 12, borderWidth: 1, borderColor: COLORS.bg },
+  input: baseInput,
   macroInputRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, gap: 10 },
-  inputMacro: { flex: 1, ...this.input },
+  inputMacro: { flex: 1, ...baseInput },
 });
 
 export default NutritionView;

@@ -1,8 +1,5 @@
 import React, { useState, useReducer } from 'react';
 import {
-
-  SafeAreaView,
-
   StyleSheet,
   View,
   TouchableOpacity,
@@ -10,6 +7,7 @@ import {
   StatusBar as RNStatusBar,
 } from 'react-native';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
