@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useReducer, useMemo } from 'react';
 import {
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,6 +15,7 @@ import {
 } from 'react-native';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { Camera } from 'expo-camera';
+import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 
 // --- 1. CONFIG & THEME ---
@@ -588,26 +588,28 @@ export default function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
   const [view, setView] = useState('home');
 
-  if (state.activeWorkout) return <ActiveSession workout={state.activeWorkout} dispatch={dispatch} history={state.history} />;
-
   return (
-    <>
+    <SafeAreaProvider>
       <ExpoStatusBar style="light" backgroundColor={COLORS.bg} />
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.content}>
-          {view === 'home' && <HomeView state={state} dispatch={dispatch} setView={setView} />}
-          {view === 'nutrition' && <NutritionView state={state} dispatch={dispatch} />}
-          {view === 'planner' && <PlannerView state={state} onStart={(t) => dispatch({ type: 'START_WORKOUT', payload: t })} />}
-          {view === 'stats' && <StatsView prs={state.prs} />}
-        </View>
-        <View style={styles.tabBar}>
-          <TouchableOpacity onPress={() => setView('home')} style={styles.tabItem}><Feather name="home" size={24} color={view === 'home' ? COLORS.primary : COLORS.textSec} /></TouchableOpacity>
-          <TouchableOpacity onPress={() => setView('planner')} style={styles.tabItem}><Feather name="calendar" size={24} color={view === 'planner' ? COLORS.primary : COLORS.textSec} /></TouchableOpacity>
-          <TouchableOpacity onPress={() => setView('nutrition')} style={styles.tabItem}><MaterialCommunityIcons name="food-apple-outline" size={26} color={view === 'nutrition' ? COLORS.primary : COLORS.textSec} /></TouchableOpacity>
-          <TouchableOpacity onPress={() => setView('stats')} style={styles.tabItem}><Feather name="bar-chart-2" size={24} color={view === 'stats' ? COLORS.primary : COLORS.textSec} /></TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    </>
+      {state.activeWorkout ? (
+        <ActiveSession workout={state.activeWorkout} dispatch={dispatch} history={state.history} />
+      ) : (
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.content}>
+            {view === 'home' && <HomeView state={state} dispatch={dispatch} setView={setView} />}
+            {view === 'nutrition' && <NutritionView state={state} dispatch={dispatch} />}
+            {view === 'planner' && <PlannerView state={state} onStart={(t) => dispatch({ type: 'START_WORKOUT', payload: t })} />}
+            {view === 'stats' && <StatsView prs={state.prs} />}
+          </View>
+          <View style={styles.tabBar}>
+            <TouchableOpacity onPress={() => setView('home')} style={styles.tabItem}><Feather name="home" size={24} color={view === 'home' ? COLORS.primary : COLORS.textSec} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => setView('planner')} style={styles.tabItem}><Feather name="calendar" size={24} color={view === 'planner' ? COLORS.primary : COLORS.textSec} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => setView('nutrition')} style={styles.tabItem}><MaterialCommunityIcons name="food-apple-outline" size={26} color={view === 'nutrition' ? COLORS.primary : COLORS.textSec} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => setView('stats')} style={styles.tabItem}><Feather name="bar-chart-2" size={24} color={view === 'stats' ? COLORS.primary : COLORS.textSec} /></TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      )}
+    </SafeAreaProvider>
   );
 }
 
