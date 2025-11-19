@@ -15,6 +15,7 @@ import {
   Alert
 } from 'react-native';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
+import { Camera } from 'expo-camera';
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 
 // --- 1. CONFIG & THEME ---
@@ -72,7 +73,7 @@ const BARCODE_DB = {
 
 // --- 3. STATE & LOGIC ---
 const initialState = {
-  user: { name: 'Champ', goals: { kcal: 3200, p: 200, c: 350, f: 90 } },
+  user: { name: 'Champ', goals: { kcal: 3200, p: 200, c: 350, f: 90, zn: 15, mg: 400 } },
   foodLog: [],
   history: [],
   prs: {}, // { 'Bankdrücken (LH)': 100 }
@@ -85,22 +86,40 @@ function appReducer(state, action) {
       return { ...state, foodLog: [...state.foodLog, { ...action.payload, timestamp: Date.now() }] };
     case 'START_WORKOUT':
       return { ...state, activeWorkout: { ...action.payload, startTime: Date.now() } };
+    case 'ADD_EXERCISE':
+      return { ...state, activeWorkout: { ...state.activeWorkout, exercises: [...state.activeWorkout.exercises, action.payload] }};
     case 'FINISH_WORKOUT':
-      // Phase 3: PR Check
-      const newPrs = { ...state.prs };
+      const newPrs = JSON.parse(JSON.stringify(state.prs));
       const workoutLogs = action.payload;
       let prBroken = false;
 
       Object.keys(workoutLogs).forEach(exName => {
         const sets = workoutLogs[exName];
         if (!sets) return;
-        const maxWeight = Math.max(...sets.map(s => parseFloat(s.weight) || 0));
-        const oldPr = newPrs[exName] || 0;
-        
-        if (maxWeight > oldPr) {
-          newPrs[exName] = maxWeight;
-          prBroken = true;
+
+        if (!newPrs[exName]) {
+          newPrs[exName] = { maxWeight: 0, repPRs: {} };
         }
+
+        const exercisePrs = newPrs[exName];
+
+        sets.forEach(set => {
+          const weight = parseFloat(set.weight);
+          const reps = parseInt(set.reps, 10);
+
+          if (!isNaN(weight) && !isNaN(reps)) {
+            if (weight > exercisePrs.maxWeight) {
+              exercisePrs.maxWeight = weight;
+              prBroken = true;
+            }
+
+            const oldRepPr = exercisePrs.repPRs[weight] || 0;
+            if (reps > oldRepPr) {
+              exercisePrs.repPRs[weight] = reps;
+              prBroken = true;
+            }
+          }
+        });
       });
 
       if (prBroken && Platform.OS !== 'web') Alert.alert('Neuer PR!', '💪 Glückwunsch!');
@@ -180,7 +199,7 @@ const HomeView = ({ state, dispatch, setView }) => {
         </Card>
         <Card style={{flex: 1, marginLeft: 8}} onPress={() => setView('stats')}>
           <Text style={styles.label}>PRs</Text>
-          <Text style={[styles.statBig, {color: COLORS.success}]}>{Object.keys(state.prs).length}</Text>
+          <Text style={[styles.statBig, {color: COLORS.success}]}>{Object.values(state.prs).reduce((acc, pr) => acc + Object.keys(pr.repPRs).length + (pr.maxWeight > 0 ? 1 : 0), 0)}</Text>
           <Text style={styles.statSub}>Rekorde</Text>
         </Card>
       </View>
@@ -210,27 +229,97 @@ const HomeView = ({ state, dispatch, setView }) => {
   );
 };
 
+const WeeklySummaryChart = ({ log, goals }) => {
+  const weekData = useMemo(() => {
+    const days = Array(7).fill(0).map(() => ({ p: 0, c: 0, f: 0, kcal: 0 }));
+    const today = new Date();
+    today.setHours(0,0,0,0);
+
+    log.forEach(item => {
+      const itemDate = new Date(item.timestamp);
+      itemDate.setHours(0,0,0,0);
+      const diffDays = Math.floor((today - itemDate) / (1000 * 60 * 60 * 24));
+
+      if (diffDays >= 0 && diffDays < 7) {
+        days[6-diffDays].p += item.p;
+        days[6-diffDays].c += item.c;
+        days[6-diffDays].f += item.f;
+        days[6-diffDays].kcal += item.kcal;
+      }
+    });
+    return days;
+  }, [log]);
+
+  const maxKcal = Math.max(goals.kcal, ...weekData.map(d => d.kcal));
+
+  return (
+    <Card>
+      <Text style={styles.cardTitle}>Wochenübersicht</Text>
+      <View style={{flexDirection: 'row', height: 150, alignItems: 'flex-end', justifyContent: 'space-around', marginTop: 15}}>
+        {weekData.map((day, i) => (
+          <View key={i} style={{flex: 1, alignItems: 'center'}}>
+            <View style={{flex: 1, width: '60%', backgroundColor: COLORS.surfaceLight, borderRadius: 5, overflow: 'hidden'}}>
+              <View style={{width: '100%', height: `${(day.kcal/maxKcal)*100}%`, backgroundColor: COLORS.primary, alignSelf: 'flex-end'}} />
+            </View>
+            <Text style={{fontSize: 10, color: COLORS.textSec, marginTop: 4}}>{['Mo','Di','Mi','Do','Fr','Sa','So'][ (new Date().getDay() + 7 - (6-i)) % 7 ]}</Text>
+          </View>
+        ))}
+      </View>
+    </Card>
+  )
+}
+
 const NutritionView = ({ state, dispatch }) => {
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  
-  const handleScan = () => {
-    setScanning(true);
-    setTimeout(() => {
-      const product = Object.values(BARCODE_DB)[0]; 
+  const [hasPermission, setHasPermission] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      setHasPermission(status === 'granted');
+    })();
+  }, []);
+
+  const handleBarCodeScanned = ({ type, data }) => {
+    const product = BARCODE_DB[data];
+    if (product) {
       dispatch({ type: 'ADD_FOOD', payload: product });
-      setScanning(false);
       setScannerOpen(false);
-    }, 1500);
+      Alert.alert('Erfolg', `${product.name} hinzugefügt!`);
+    } else {
+      Alert.alert('Fehler', 'Produkt nicht gefunden.');
+      setScannerOpen(false);
+    }
   };
+
+  const micros = state.foodLog.reduce((acc, item) => {
+    Object.keys(item.micros || {}).forEach(key => {
+      acc[key] = (acc[key] || 0) + item.micros[key];
+    });
+    return acc;
+  }, {});
 
   return (
     <View style={styles.container}>
       <View style={styles.header}><Text style={styles.screenTitle}>Ernährung</Text></View>
       <ScrollView contentContainerStyle={{paddingBottom: 100}}>
-        <Card style={{marginBottom: 20}}>
+        <WeeklySummaryChart log={state.foodLog} goals={state.user.goals} />
+
+        <Text style={styles.sectionTitle}>Mikronährstoffe</Text>
+        <View style={{flexDirection:'row', justifyContent: 'space-around', marginBottom: 20}}>
+          {['zn', 'mg'].map(m => (
+            <View key={m} style={{alignItems:'center'}}>
+              <Text style={styles.label}>{m.toUpperCase()}</Text>
+              <Text style={{color: COLORS.secondary, fontSize: 18, fontWeight: 'bold'}}>{(micros[m] || 0).toFixed(1)} / {state.user.goals[m]}mg</Text>
+            </View>
+          ))}
+        </View>
+
+        <Card>
           <Button label="Scan starten" onPress={() => setScannerOpen(true)} icon="camera" />
         </Card>
+
+        <Text style={styles.sectionTitle}>Heutige Einträge</Text>
         {state.foodLog.slice().reverse().map((item, i) => (
           <View key={i} style={styles.foodItem}>
             <Text style={styles.foodName}>{item.name}</Text>
@@ -238,24 +327,30 @@ const NutritionView = ({ state, dispatch }) => {
           </View>
         ))}
       </ScrollView>
-      <Modal visible={scannerOpen} animationType="slide" transparent>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Scanner</Text>
-            <View style={styles.scannerPlaceholder}>
-              {scanning ? <ActivityIndicator color={COLORS.primary} size="large"/> : <Ionicons name="scan" size={50} color={COLORS.textSec} />}
-            </View>
-            <Button label={scanning ? "Scanne..." : "Scan simulieren"} onPress={handleScan} disabled={scanning} />
-            <Button label="Abbrechen" variant="secondary" onPress={() => setScannerOpen(false)} style={{marginTop:10}} />
-          </View>
+      <Modal visible={scannerOpen} animationType="slide">
+        <View style={{flex: 1, backgroundColor: COLORS.bg}}>
+          {hasPermission === null && <Text style={styles.emptyText}>Kamerazugriff wird angefordert...</Text>}
+          {hasPermission === false && <Text style={styles.emptyText}>Kein Zugriff auf Kamera.</Text>}
+          {hasPermission && (
+            <Camera
+              onBarCodeScanned={handleBarCodeScanned}
+              style={StyleSheet.absoluteFillObject}
+            />
+          )}
+          <Button label="Abbrechen" variant="secondary" onPress={() => setScannerOpen(false)} style={{position: 'absolute', bottom: 40, left: 20, right: 20}} />
         </View>
       </Modal>
     </View>
   );
 };
 
+const getAlternatives = (exercise, db) => {
+  return db.filter(e => e.muscle === exercise.muscle && e.id !== exercise.id && e.type !== exercise.type);
+};
+
 const PlannerView = ({ state, onStart }) => {
   const [selectedMuscle, setSelectedMuscle] = useState(null);
+  const [alternatives, setAlternatives] = useState([]);
   
   const getExercises = (muscle) => {
     return EXERCISE_DB.filter(e => e.muscle === muscle);
@@ -266,7 +361,14 @@ const PlannerView = ({ state, onStart }) => {
       <View style={styles.header}><Text style={styles.screenTitle}>Planer</Text></View>
       <ScrollView contentContainerStyle={{paddingBottom: 100}}>
         <Card>
-          <Text style={styles.cardTitle}>Muskel wählen</Text>
+          <Button
+            label="Leeres Workout starten"
+            icon="plus"
+            onPress={() => onStart({ name: 'Freies Training', exercises: [] })}
+            variant="secondary"
+            style={{marginBottom: 16}}
+          />
+          <Text style={styles.cardTitle}>Oder Muskel wählen</Text>
           <View style={{flexDirection:'row', flexWrap:'wrap', gap:8, marginTop:10}}>
             {['Brust', 'Rücken', 'Beine', 'Schulter', 'Arme'].map(m => (
               <TouchableOpacity key={m} 
@@ -284,10 +386,14 @@ const PlannerView = ({ state, onStart }) => {
             <Text style={styles.sectionTitle}>Übungen für {selectedMuscle}</Text>
             {getExercises(selectedMuscle).map(ex => (
               <Card key={ex.id} style={styles.exerciseCard}>
-                <View>
+                <View style={{flex: 1}}>
                   <Text style={styles.cardTitle}>{ex.name}</Text>
-                  {state.prs[ex.name] && <Text style={{color: COLORS.success, fontSize:12}}>PR: {state.prs[ex.name]}kg 🏆</Text>}
+                  {state.prs[ex.name] && state.prs[ex.name].maxWeight > 0 &&
+                    <Text style={{color: COLORS.success, fontSize:12}}>PR: {state.prs[ex.name].maxWeight}kg 🏆</Text>}
                 </View>
+                <TouchableOpacity style={{marginRight: 15}} onPress={() => setAlternatives(getAlternatives(ex, EXERCISE_DB))}>
+                  <MaterialCommunityIcons name="swap-horizontal-bold" size={24} color={COLORS.secondary} />
+                </TouchableOpacity>
                 <Feather name="plus-circle" size={24} color={COLORS.primary} />
               </Card>
             ))}
@@ -295,14 +401,51 @@ const PlannerView = ({ state, onStart }) => {
           </View>
         )}
       </ScrollView>
+      <Modal visible={alternatives.length > 0} animationType="slide" transparent>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Alternativen</Text>
+            {alternatives.map(alt => (
+              <Card key={alt.id} style={{marginBottom: 8}}>
+                <Text style={styles.cardTitle}>{alt.name}</Text>
+                <Text style={styles.cardText}>{alt.type === 'compound' ? 'Verbundübung' : 'Isolation'}</Text>
+              </Card>
+            ))}
+            <Button label="Schließen" variant="secondary" onPress={() => setAlternatives([])} style={{marginTop: 10}} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
 
 // Phase 3: Functional Logger (Speichert Gewicht & Reps)
-const ActiveSession = ({ workout, dispatch }) => {
+const ActiveSession = ({ workout, dispatch, history }) => {
   const [elapsed, setElapsed] = useState(0);
-  const [logs, setLogs] = useState({});
+  const [modalVisible, setModalVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const getLastLog = (exerciseName, history) => {
+    if (!history) return { weight: '', reps: '' };
+    for (let i = history.length - 1; i >= 0; i--) {
+      const pastWorkout = history[i];
+      if (pastWorkout.logs && pastWorkout.logs[exerciseName] && pastWorkout.logs[exerciseName].length > 0) {
+        for (let j = pastWorkout.logs[exerciseName].length - 1; j >= 0; j--) {
+          const set = pastWorkout.logs[exerciseName][j];
+          if (set.weight || set.reps) return { weight: set.weight || '', reps: set.reps || '' };
+        }
+      }
+    }
+    return { weight: '', reps: '' };
+  };
+
+  const [logs, setLogs] = useState(() => {
+    const initialLogs = {};
+    workout.exercises.forEach(ex => {
+      initialLogs[ex.name] = [getLastLog(ex.name, history)];
+    });
+    return initialLogs;
+  });
 
   useEffect(() => { const t = setInterval(() => setElapsed(e => e + 1), 1000); return () => clearInterval(t); }, []);
 
@@ -315,8 +458,9 @@ const ActiveSession = ({ workout, dispatch }) => {
   };
 
   const addSet = (exName) => {
-    const currentSets = logs[exName] || [{ weight: '', reps: '' }];
-    setLogs({ ...logs, [exName]: [...currentSets, { weight: '', reps: '' }] });
+    const currentSets = logs[exName] || [];
+    const lastSet = currentSets.length > 0 ? currentSets[currentSets.length - 1] : getLastLog(exName, history);
+    setLogs({ ...logs, [exName]: [...currentSets, { ...lastSet }] });
   };
 
   return (
@@ -357,16 +501,94 @@ const ActiveSession = ({ workout, dispatch }) => {
             </TouchableOpacity>
           </View>
         ))}
+        <Button
+          label="Übung hinzufügen"
+          icon="plus"
+          variant="secondary"
+          onPress={() => setModalVisible(true)}
+          style={{marginTop: 20}}
+        />
       </ScrollView>
+
+      <Modal visible={modalVisible} animationType="slide" transparent>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Übung hinzufügen</Text>
+            <TextInput
+              style={[styles.inputTable, {width: '100%', marginBottom: 15, height: 50}]}
+              placeholder="Suchen..."
+              placeholderTextColor="#777"
+              onChangeText={setSearchQuery}
+              value={searchQuery}
+            />
+            <ScrollView>
+              {EXERCISE_DB.filter(ex => ex.name.toLowerCase().includes(searchQuery.toLowerCase())).map(ex => (
+                <TouchableOpacity
+                  key={ex.id}
+                  style={styles.exerciseCard}
+                  onPress={() => {
+                    dispatch({ type: 'ADD_EXERCISE', payload: ex });
+                    setModalVisible(false);
+                    setSearchQuery('');
+                  }}
+                >
+                  <Text style={styles.cardTitle}>{ex.name}</Text>
+                  <Feather name="plus-circle" size={24} color={COLORS.primary} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <Button label="Schließen" variant="secondary" onPress={() => setModalVisible(false)} style={{marginTop: 20}}/>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
+
+const StatsView = ({ prs }) => {
+  const [selectedEx, setSelectedEx] = useState(null);
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}><Text style={styles.screenTitle}>Rekorde</Text></View>
+      <ScrollView>
+        {Object.keys(prs).map(exName => {
+          const prData = prs[exName];
+          const repPrs = Object.entries(prData.repPRs || {}).sort((a,b) => b[0] - a[0]);
+
+          return (
+            <Card key={exName} onPress={() => setSelectedEx(selectedEx === exName ? null : exName)}>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
+                <Text style={styles.cardTitle}>{exName}</Text>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                  <Text style={{color: COLORS.success, fontWeight: 'bold'}}>{prData.maxWeight}kg</Text>
+                  <Feather name={selectedEx === exName ? "chevron-up" : "chevron-down"} size={20} color={COLORS.textSec} style={{marginLeft: 10}} />
+                </View>
+              </View>
+              {selectedEx === exName && (
+                <View style={{marginTop: 15, borderTopWidth: 1, borderTopColor: COLORS.surfaceLight, paddingTop: 10}}>
+                  <Text style={{color: COLORS.textSec, marginBottom: 5}}>Bestleistungen:</Text>
+                  {repPrs.map(([weight, reps]) => (
+                    <View key={weight} style={{flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2}}>
+                      <Text style={{color: COLORS.text}}>{weight} kg</Text>
+                      <Text style={{color: COLORS.primary}}>{reps} Wiederholungen</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </Card>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
 
 export default function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
   const [view, setView] = useState('home');
 
-  if (state.activeWorkout) return <ActiveSession workout={state.activeWorkout} dispatch={dispatch} />;
+  if (state.activeWorkout) return <ActiveSession workout={state.activeWorkout} dispatch={dispatch} history={state.history} />;
 
   return (
     <>
@@ -376,7 +598,7 @@ export default function App() {
           {view === 'home' && <HomeView state={state} dispatch={dispatch} setView={setView} />}
           {view === 'nutrition' && <NutritionView state={state} dispatch={dispatch} />}
           {view === 'planner' && <PlannerView state={state} onStart={(t) => dispatch({ type: 'START_WORKOUT', payload: t })} />}
-          {view === 'stats' && <View style={styles.container}><Text style={{color:'white', textAlign:'center', marginTop:20}}>Statistiken in Phase 4</Text></View>}
+          {view === 'stats' && <StatsView prs={state.prs} />}
         </View>
         <View style={styles.tabBar}>
           <TouchableOpacity onPress={() => setView('home')} style={styles.tabItem}><Feather name="home" size={24} color={view === 'home' ? COLORS.primary : COLORS.textSec} /></TouchableOpacity>
