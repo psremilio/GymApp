@@ -38,9 +38,11 @@ export function appReducer(state, action) {
       return { ...state, activeWorkout: { ...state.activeWorkout, exercises: [...state.activeWorkout.exercises, action.payload] }};
     case 'FINISH_WORKOUT': {
       const newPrs = JSON.parse(JSON.stringify(state.prs));
-      const workoutLogs = action.payload;
+      const { logs: workoutLogs, duration } = action.payload;
       let prBroken = false;
-      const muscleVolume = {};
+
+      // Calculate volume for current workout
+      const currentMuscleVolume = {};
 
       Object.keys(workoutLogs).forEach(exName => {
         const sets = workoutLogs[exName];
@@ -48,7 +50,7 @@ export function appReducer(state, action) {
 
         const exerciseInfo = EXERCISE_DB.find(ex => ex.name === exName);
         const muscle = exerciseInfo ? exerciseInfo.muscle : 'Unknown';
-        if (!muscleVolume[muscle]) muscleVolume[muscle] = 0;
+        if (!currentMuscleVolume[muscle]) currentMuscleVolume[muscle] = 0;
 
         if (!newPrs[exName]) newPrs[exName] = { maxWeight: 0, repPRs: {} };
         const exercisePrs = newPrs[exName];
@@ -57,7 +59,7 @@ export function appReducer(state, action) {
           const weight = parseFloat(set.weight) || 0;
           const reps = parseInt(set.reps, 10) || 0;
 
-          muscleVolume[muscle] += weight * reps;
+          currentMuscleVolume[muscle] += weight * reps;
 
           if (weight > exercisePrs.maxWeight) {
             exercisePrs.maxWeight = weight;
@@ -73,17 +75,39 @@ export function appReducer(state, action) {
 
       if (prBroken && Platform.OS !== 'web') Alert.alert('Neuer PR!', '💪 Glückwunsch!');
 
-      const maxVolume = Math.max(...Object.values(muscleVolume));
+      // Calculate cumulative intensity from history + current workout
+      // Decaying factor logic: Recent workouts count more.
+      // This is a simplified version where we just sum up volume of last 5 workouts
+      const relevantHistory = [...state.history, { logs: workoutLogs }].slice(-5);
+
+      const aggregatedVolume = {};
+      let maxGlobalVolume = 0;
+
+      relevantHistory.forEach(session => {
+        if (!session.logs) return;
+        Object.keys(session.logs).forEach(exName => {
+           const sets = session.logs[exName];
+           const exerciseInfo = EXERCISE_DB.find(ex => ex.name === exName);
+           const muscle = exerciseInfo ? exerciseInfo.muscle : 'Unknown';
+           if (!aggregatedVolume[muscle]) aggregatedVolume[muscle] = 0;
+
+           sets.forEach(set => {
+             aggregatedVolume[muscle] += (parseFloat(set.weight) || 0) * (parseInt(set.reps) || 0);
+           });
+        });
+      });
+
+      // Normalize
+      maxGlobalVolume = Math.max(...Object.values(aggregatedVolume), 1); // avoid div by 0
+
       const newMuscleIntensity = {};
-      if (maxVolume > 0) {
-        for (const muscle in muscleVolume) {
-          newMuscleIntensity[muscle] = muscleVolume[muscle] / maxVolume;
-        }
+      for (const muscle in aggregatedVolume) {
+        newMuscleIntensity[muscle] = aggregatedVolume[muscle] / maxGlobalVolume;
       }
 
       return {
         ...state,
-        history: [...state.history, { ...state.activeWorkout, endTime: Date.now(), logs: workoutLogs }],
+        history: [...state.history, { ...state.activeWorkout, endTime: Date.now(), logs: workoutLogs, duration }],
         prs: newPrs,
         activeWorkout: null,
         muscleIntensity: newMuscleIntensity,
