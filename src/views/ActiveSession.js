@@ -40,7 +40,7 @@ const ActiveSession = ({ workout, dispatch, history }) => {
       <View style={styles.sessionHeader}>
         <TouchableOpacity onPress={() => dispatch({ type: 'CANCEL_WORKOUT' })}><Feather name="x" size={24} color={COLORS.textSec} /></TouchableOpacity>
         <Text style={styles.timer}>{Math.floor(elapsed / 60)}:{elapsed % 60 < 10 ? '0' : ''}{elapsed % 60}</Text>
-        <TouchableOpacity onPress={() => dispatch({ type: 'FINISH_WORKOUT', payload: logs })}><Text style={{color: COLORS.primary}}>Fertig</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => dispatch({ type: 'FINISH_WORKOUT', payload: { logs, duration: elapsed } })}><Text style={{color: COLORS.primary}}>Fertig</Text></TouchableOpacity>
       </View>
       <ScrollView contentContainerStyle={{padding: 20}}>
         <Text style={styles.sessionTitle}>{workout.name}</Text>

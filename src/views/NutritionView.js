@@ -57,8 +57,14 @@ const NutritionView = ({ state, dispatch }) => {
 
   useEffect(() => {
     (async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      setHasPermission(status === 'granted');
+      // We only request camera permissions if we are not on web.
+      // Expo Camera on web might work differently or require different handling.
+      if (Platform.OS !== 'web') {
+        const { status } = await Camera.requestCameraPermissionsAsync();
+        setHasPermission(status === 'granted');
+      } else {
+        setHasPermission(true); // Mock permission for web
+      }
     })();
   }, []);
 
@@ -125,10 +131,16 @@ const NutritionView = ({ state, dispatch }) => {
           {hasPermission === null && <Text style={styles.emptyText}>Kamerazugriff wird angefordert...</Text>}
           {hasPermission === false && <Text style={styles.emptyText}>Kein Zugriff auf Kamera.</Text>}
           {hasPermission && (
-            <Camera
-              onBarCodeScanned={handleBarCodeScanned}
-              style={StyleSheet.absoluteFillObject}
-            />
+             Platform.OS === 'web' ? (
+                <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+                  <Text style={styles.emptyText}>Scanner nicht im Web verfügbar</Text>
+                </View>
+             ) : (
+              <Camera
+                onBarCodeScanned={handleBarCodeScanned}
+                style={StyleSheet.absoluteFillObject}
+              />
+             )
           )}
           <Button label="Abbrechen" variant="secondary" onPress={() => setScannerOpen(false)} style={{position: 'absolute', bottom: 40, left: 20, right: 20}} />
         </View>
